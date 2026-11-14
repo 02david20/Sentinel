@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/engine"
 )
 
 const pyTemplate = `#!/usr/bin/env python3

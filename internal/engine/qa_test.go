@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"sentinel/internal/engine"
-	"sentinel/internal/store"
+	"github.com/02david20/Sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/store"
 )
 
 type qaBlock struct {

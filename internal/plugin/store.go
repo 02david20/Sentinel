@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/engine"
 )
 
 // States of a block folder.

@@ -17,12 +17,17 @@ import (
 	"syscall"
 	"time"
 
-	"sentinel/internal/blocks"
-	"sentinel/internal/engine"
-	"sentinel/internal/store"
+	"github.com/02david20/Sentinel/internal/blocks"
+	"github.com/02david20/Sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/store"
 )
 
-var version = "0.1.0"
+// Set at build time by the release pipeline: -X main.version=... -X main.commit=... -X main.date=...
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 const usage = `sentinel: run recurring checks on a timer. It starts an agent only when something needs a decision.
 
@@ -103,7 +108,7 @@ func main() {
 	case "doctor":
 		err = cmdDoctor()
 	case "version", "--version", "-v":
-		fmt.Println("sentinel", version)
+		fmt.Printf("sentinel %s (commit %s, built %s)\n", version, commit, date)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:

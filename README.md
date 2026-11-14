@@ -70,14 +70,20 @@ Markers: `◇` only reads, `◆` saves state locally, `■` changes something ou
 
 ## Install
 
-Requires Go 1.24+.
-
 ```bash
-git clone https://github.com/02david20/Sentinel.git
-cd Sentinel
-go build -o ~/.local/bin/sentinel ./cmd/sentinel
-sentinel doctor        # checks state, blocks, and the optional webhook / agent / systemd
+curl -fsSL https://raw.githubusercontent.com/02david20/Sentinel/main/scripts/install.sh | sh
+sentinel doctor
 ```
+
+The script downloads the right binary for Linux or macOS (amd64 or arm64), verifies its checksum and
+installs it to `~/.local/bin`. Other options (manual download, `.deb`/`.rpm`, Homebrew, `go install`,
+building from source), scheduling, upgrading and troubleshooting are in
+[docs/INSTALL.md](docs/INSTALL.md). Maintainers: [docs/RELEASING.md](docs/RELEASING.md).
+
+From source (Go 1.24+): `git clone https://github.com/02david20/Sentinel.git && cd Sentinel && make install`.
+
+> No release has been published yet, so the script reports "could not find a release" until a
+> maintainer tags one. Until then build from source.
 
 ## Quick start
 
@@ -207,7 +213,8 @@ Examples: `examples/blocks/`.
 | `internal/plugin` | external blocks: manifest, process runner, approval gate, scaffold and check |
 | `examples/` | example plugin blocks and a workflow that uses them |
 | `internal/tui` | terminal UI |
-| `tools/demo` | scripts that record the demo video from the real TUI |
+| `tools/demo` | scripts that record the demo videos from the real TUI and shell |
+| `scripts/`, `.goreleaser.yaml`, `.github/` | install script, release build and CI ([docs/RELEASING.md](docs/RELEASING.md)) |
 | `workflows/` | your workflow files (`example.yaml` is a starter) |
 
 More detail: [docs/ENGINE.md](docs/ENGINE.md).

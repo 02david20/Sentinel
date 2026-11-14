@@ -1,0 +1,72 @@
+# Release pipeline: `git tag v0.2.0 && git push origin v0.2.0` runs this through
+# .github/workflows/release.yml. Test locally without publishing:
+#   goreleaser release --snapshot --clean      (needs goreleaser; or use scripts/build-dist.sh)
+version: 2
+project_name: sentinel
+
+builds:
+  - id: sentinel
+    main: ./cmd/sentinel
+    binary: sentinel
+    env: [CGO_ENABLED=0]           # pure Go (SQLite is modernc.org/sqlite): one static binary
+    goos: [linux, darwin]          # windows is not supported (the store uses Unix file locks)
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # must match scripts/install.sh and scripts/build-dist.sh
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: false       # the binary sits at the top level of the archive
+    files:
+      - README.md
+      - docs/**/*
+      - examples/**/*
+      - workflows/**/*
+      # add "LICENSE*" here once a license file exists
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ['^docs:', '^test:', '^chore:', 'Merge pull request', 'Merge branch']
+
+release:
+  github:
+    owner: 02david20
+    name: Sentinel
+  prerelease: auto                 # v0.3.0-rc.1 is published as a pre-release
+  draft: false
+
+# Linux packages (.deb / .rpm) are attached to the same release.
+nfpms:
+  - id: packages
+    package_name: sentinel
+    formats: [deb, rpm]
+    maintainer: "David Huynh <https://github.com/02david20>"
+    homepage: https://github.com/02david20/Sentinel
+    description: "Deterministic workflows that wake your AI agent only when something changed."
+    bindir: /usr/bin
+    contents:
+      - src: docs/
+        dst: /usr/share/doc/sentinel/
+        type: tree
+
+# Homebrew: create the repo 02david20/homebrew-tap first (see docs/RELEASING.md), add a
+# HOMEBREW_TAP_GITHUB_TOKEN secret to this repo, then uncomment.
+# brews:
+#   - name: sentinel
+#     repository:
+#       owner: 02david20
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     homepage: https://github.com/02david20/Sentinel
+#     description: "Deterministic workflows that wake your AI agent only when something changed."
+#     test: |
+#       system "#{bin}/sentinel", "version"

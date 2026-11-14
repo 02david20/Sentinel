@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"sentinel/internal/engine"
-	"sentinel/internal/store"
+	"github.com/02david20/Sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/store"
 )
 
 // StoreBackend reads the same SQLite state the CLI reads and performs actions by calling the

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"text/template"
 
-	"sentinel/internal/engine"
-	"sentinel/internal/plugin"
+	"github.com/02david20/Sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/plugin"
 )
 
 // The service exits 3 (paused) and 4 (needs login) on purpose; neither is a unit failure, so the

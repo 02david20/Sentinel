@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	_ "sentinel/internal/blocks" // registers the built-ins, which plugins must not shadow
-	"sentinel/internal/engine"
+	_ "github.com/02david20/Sentinel/internal/blocks" // registers the built-ins, which plugins must not shadow
+	"github.com/02david20/Sentinel/internal/engine"
 )
 
 // writeBlock creates <root>/<where>/<name> with a manifest and a /bin/sh script body.

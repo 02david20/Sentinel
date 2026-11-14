@@ -17,7 +17,7 @@ import (
 	"github.com/expr-lang/expr"
 	"gopkg.in/yaml.v3"
 
-	"sentinel/internal/store"
+	"github.com/02david20/Sentinel/internal/store"
 )
 
 // Effect classifies what a block may change.

@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"sentinel/internal/tui"
+	"github.com/02david20/Sentinel/internal/tui"
 )
 
 // isTerminal is true when both input and output are a terminal, so `sentinel` alone opens the view for

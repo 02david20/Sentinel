@@ -16,8 +16,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"sentinel/internal/engine"
-	"sentinel/internal/store"
+	"github.com/02david20/Sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/store"
 )
 
 func init() {

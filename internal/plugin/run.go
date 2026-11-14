@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/engine"
 )
 
 const (

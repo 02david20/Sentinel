@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/engine"
 )
 
 const (

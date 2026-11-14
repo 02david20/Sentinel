@@ -1,4 +1,4 @@
-module sentinel
+module github.com/02david20/Sentinel
 
 go 1.24
 

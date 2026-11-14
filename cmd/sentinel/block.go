@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"sentinel/internal/engine"
-	"sentinel/internal/plugin"
+	"github.com/02david20/Sentinel/internal/engine"
+	"github.com/02david20/Sentinel/internal/plugin"
 )
 
 func blocksDir() string {
