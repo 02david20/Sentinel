@@ -175,7 +175,7 @@ func hintLines() []string {
 }
 
 func logoBlock() string {
-	return logo.Render("╦ ╦╔═╗\n║║║╠╣ \n╚╩╝╚  ")
+	return logo.Render("◆ SENTINEL")
 }
 
 func fitBlock(lines []string, w int) string {
@@ -203,7 +203,7 @@ func (m Model) table(width int) string {
 		sum := ""
 		if r.LastOK != nil {
 			last = ago(r.LastOKAt)
-			last = strings.Replace(strings.Replace(last, " min", "m", 1), " h", "h", 1)
+			last = strings.Replace(strings.Replace(strings.Replace(last, "under a minute", "now", 1), " min", "m", 1), " h", "h", 1)
 			sum = strings.Join(strings.Fields(r.LastOK.Summary), " ")
 		}
 		cells := fmt.Sprintf(" %s %s %s", padTo(trunc(r.Name, nameW), nameW), padTo(style.Render(trunc(st, stateW)), stateW), padTo(dim.Render(trunc(last, lastW)), lastW))
@@ -307,13 +307,15 @@ func (m Model) message(w int) string {
 }
 
 func (m Model) helpView(w, h int) string {
-	k := func(keys, d string) string { return "  " + keyCap.Render(padTo(keys, 14)) + d }
+	k := func(keys, d string) string { return "  " + keyCap.Render(padTo(keys, 18)) + d }
 	lines := []string{
 		"",
 		k("↑ ↓  or  j k", "choose a workflow"),
 		k("g  G", "first / last"),
 		k("enter", "open a workflow: its graph and every run"),
-		k("  in a workflow", "↑↓ pick a run (the graph shows what that run did), l log, PgUp/PgDn scroll, esc back"),
+		k("  (in one)  ↑ ↓", "pick a run: the graph shows what that run did"),
+		k("  (in one)  l", "show the run's log instead of the graph"),
+		k("  (in one)  PgUp", "scroll the graph or log (PgDn goes down)"),
 		k("d", "dry run: reads, sends and saves nothing"),
 		k("r", "run for real (asks first; may post to the webhook and start an escalation)"),
 		k("a", "mark the waiting escalation as handled (asks first)"),

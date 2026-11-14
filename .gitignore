@@ -5,3 +5,9 @@ dist/
 .env
 secrets/
 .DS_Store
+tools/demo/sentinel
+tools/demo/state/
+tools/demo/demo/
+tools/demo/frames/
+tools/demo/venv/
+tools/demo/srv.pid
