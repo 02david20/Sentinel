@@ -1,11 +1,19 @@
 # Sentinel
 
-**Recurring checks that cost nothing when nothing happens.**
+**Make your AI agent a deterministic assistant: workflows handle the checking, and the agent is prompted only when a decision is needed.**
 
-Sentinel runs a *workflow* (a short YAML file of steps) on a timer. Each step is a tested,
-compiled-in **block**; the YAML contains no code. A run reads some data, compares it with last
-time and stops. Only when something is new and needs a decision does it start an **agent** (any
-command you choose). A check that finds nothing makes no noise and spends no model tokens.
+Agents are good at judgment but wasteful and unpredictable at repetitive checking. Sentinel
+splits the job:
+
+- **The workflow is deterministic.** A *workflow* is a short YAML file of steps on a timer. Each
+  step is a tested, compiled-in **block**; the YAML contains no code. A run reads data, compares
+  it with last time and decides whether anything is new, the same way on every run.
+- **The agent is prompted only for the decision.** When something needs judgment, Sentinel hands
+  your agent (any command you choose) a task file with a prompt and the relevant data. Nothing
+  new means no prompt, no model tokens and no noise.
+
+Runs are reproducible, stored per workflow with per-step results and logs. You can dry-run
+first, and idempotency keys stop a repeated run from repeating an effect.
 
 ```
 timer ──► read ──► diff against last run ──► nothing new? stop (silent)
