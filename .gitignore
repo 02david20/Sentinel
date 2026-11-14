@@ -1,0 +1,7 @@
+runtime/
+bin/
+dist/
+*.db
+.env
+secrets/
+.DS_Store

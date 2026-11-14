@@ -1,0 +1,30 @@
+# Starter workflow: no external services. Copy it and replace the `items` with a real source block.
+name: example
+every: 4h
+write_allow: [Snapshot.Commit]
+summary: "${changes.added_count} new, ${changes.changed_count} changed."
+
+steps:
+  - id: changes
+    block: Diff
+    in:
+      name: example
+      items:
+        - { id: A-1, sig: v1 }
+        - { id: A-2, sig: v1 }
+      key: id
+      fingerprint: sig
+
+  - id: new_ids
+    block: Brief
+    in: { items: "${changes.added}", key: id }
+
+  - id: save
+    block: Snapshot.Commit
+    when: "changes.has_changes"
+    in:
+      name: example
+      items:
+        - { id: A-1, sig: v1 }
+        - { id: A-2, sig: v1 }
+      key: id
