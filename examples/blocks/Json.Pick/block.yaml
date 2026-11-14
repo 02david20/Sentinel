@@ -1,0 +1,30 @@
+name: Json.Pick
+doc: >-
+  Turns JSON (text or an already parsed value) into a keyed list that Diff can compare. `path` is
+  a dotted path to the list ("" for the top level); each item becomes {id, sig} where id is the
+  `key` field and sig is the `fingerprint` field(s) (comma separated) written as text.
+effect: read
+inputs:
+  json: any
+  path: string
+  key: string
+  fingerprint: string
+outputs:
+  items: list
+  count: number
+run: [python3, block.py]
+timeout: 10
+tests:
+  - name: top-level list
+    in: { json: '[{"id":"A","price":1},{"id":"B","price":2}]', path: "", key: id, fingerprint: price }
+    out:
+      count: 2
+      items: [{ id: A, sig: "1" }, { id: B, sig: "2" }]
+  - name: nested path
+    in: { json: '{"data":{"rows":[{"id":"X","v":"a","w":"b"}]}}', path: data.rows, key: id, fingerprint: "v,w" }
+    out:
+      count: 1
+      items: [{ id: X, sig: '["a","b"]' }]
+  - name: bad json
+    in: { json: "{not json", path: "", key: id, fingerprint: id }
+    error: not valid JSON

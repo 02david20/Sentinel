@@ -45,13 +45,14 @@ All commands:
   sentinel tui                               interactive view (the same as plain sentinel in a terminal)
   sentinel validate <file>                   check a workflow definition
   sentinel blocks [--json]                   list the steps a workflow can use
+  sentinel block <list|new|add|show|check|approve|revoke|remove>   add your own steps (see docs/BLOCKS.md)
   sentinel version
 
 Exit codes: 0 ok | 1 failed | 2 wrong usage | 3 paused | 4 a connector login failed
-Settings (optional): SENTINEL_STATE_DIR, SENTINEL_WEBHOOK_URL (or ~/.config/sentinel/webhook), SENTINEL_AGENT_CMD
+Settings (optional): SENTINEL_STATE_DIR, SENTINEL_WEBHOOK_URL (or ~/.config/sentinel/webhook), SENTINEL_AGENT_CMD, SENTINEL_BLOCKS_DIR, SENTINEL_APPROVALS_FILE
 `
 
-var commands = []string{"graph", "logs", "tui", "run", "status", "ack", "pause", "resume", "install", "uninstall", "validate", "blocks", "doctor", "version", "help"}
+var commands = []string{"block", "graph", "logs", "tui", "run", "status", "ack", "pause", "resume", "install", "uninstall", "validate", "blocks", "doctor", "version", "help"}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -65,6 +66,7 @@ func main() {
 		fmt.Print(usage)
 		return
 	}
+	loadPlugins()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var err error
@@ -72,6 +74,8 @@ func main() {
 	switch cmd {
 	case "tui":
 		err = cmdTUI()
+	case "block":
+		err = cmdBlock(args)
 	case "graph":
 		err = cmdGraph(args)
 	case "logs":
@@ -234,7 +238,7 @@ func cmdBlocks(args []string) error {
 		return nil
 	}
 	for _, s := range engine.Blocks() {
-		fmt.Printf("%s   (%s)\n    %s\n    needs:    %s\n    provides: %s\n\n", s.Name, effectWords(s.Effect), firstSentence(s.Doc), fmtPorts(s.Inputs), fmtPorts(s.Outputs))
+		fmt.Printf("%s%s   (%s)\n    %s\n    needs:    %s\n    provides: %s\n\n", s.Name, blockSource(s), effectWords(s.Effect), firstSentence(s.Doc), fmtPorts(s.Inputs), fmtPorts(s.Outputs))
 	}
 	return nil
 }
@@ -281,6 +285,7 @@ func cmdValidate(args []string) error {
 		for _, e := range errs {
 			fmt.Println("  -", e)
 		}
+		hintBlocks(errs)
 		return exitErr{1, ""}
 	}
 	fmt.Printf("ok: %s (%d steps)\n", p.Workflow.Name, len(p.Workflow.Steps))
@@ -331,6 +336,7 @@ func runOne(ctx context.Context, st *store.Store, path string, dry, verbose, asJ
 		for _, e := range errs {
 			fmt.Println("  -", e)
 		}
+		hintBlocks(errs)
 		return exitErr{1, ""}
 	}
 	_ = st.RegisterWorkflow(p.Workflow.Name, path)

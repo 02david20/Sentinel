@@ -1,0 +1,24 @@
+# Uses the external block Json.Pick (examples/blocks/Json.Pick) to feed Diff.
+# Install it first:  sentinel block add examples/blocks/Json.Pick && sentinel block check Json.Pick && sentinel block approve Json.Pick
+name: plugin-demo
+every: 4h
+write_allow: [Snapshot.Commit]
+summary: "${changes.added_count} new, ${changes.changed_count} changed of ${picked.count}."
+
+steps:
+  - id: picked
+    block: Json.Pick
+    in:
+      json: '[{"id":"A-1","price":10},{"id":"A-2","price":25}]'
+      path: ""
+      key: id
+      fingerprint: price
+
+  - id: changes
+    block: Diff
+    in: { name: plugin-demo, items: "${picked.items}", key: id, fingerprint: sig }
+
+  - id: save
+    block: Snapshot.Commit
+    when: "changes.has_changes"
+    in: { name: plugin-demo, items: "${picked.items}", key: id }

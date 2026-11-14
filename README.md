@@ -26,6 +26,9 @@ timer ──► read ──► diff against last run ──► nothing new? stop
 - **Safe by construction**: the validator checks references; anything that changes something
   outside the machine needs an `idempotency_key`, so a repeated run never repeats the effect;
   an optional `write_allow` list restricts which blocks may write.
+- **Pluggable blocks**: add steps without recompiling. A block is a folder with a manifest and any
+  executable (JSON in, JSON out). An agent can write one; a person approves the exact contents
+  before it can run ([docs/BLOCKS.md](docs/BLOCKS.md)).
 - **Dry runs**: `--dry-run` shows what a run would do; nothing is sent or saved.
 - **Many runs per workflow**: every run (real or dry) is stored under its workflow with
   per-step results and an event log.
@@ -100,6 +103,7 @@ After the first run, a workflow can be addressed by its name (`sentinel status e
 | `install <file>` / `uninstall <name>` | create or remove the timer |
 | `validate <file>` | check a definition |
 | `blocks [--json]` | list blocks with inputs and outputs |
+| `block <list\|new\|add\|show\|check\|approve\|revoke\|remove>` | manage plugin blocks |
 | `tui` | the interactive view (same as bare `sentinel`) |
 | `doctor` | check settings |
 
@@ -146,13 +150,24 @@ steps:
 | `Agent.Escalate` | external | write a task file, optionally start an agent command |
 
 Sentinel ships no data sources. A real workflow needs a block that reads something (an HTTP API,
-a file, a database). Adding one is a small Go type.
+a file, a database). Add one as a plugin block (`examples/blocks/Http.Get`, `Json.Pick`) or in Go.
 
 ### Adding a block
 
-Implement `engine.Block` (a `Spec()` and a `Run()`), register it in `init()` and rebuild.
-See `internal/blocks/flow.go` for working examples; `sentinel blocks` then lists it and the
-validator enforces its inputs.
+**Without recompiling** (any language, agent-friendly): scaffold, test, review, approve.
+
+```bash
+sentinel block new Http.Get            # or: sentinel block add ./MyBlock
+sentinel block check Http.Get          # manifest + tests
+sentinel block show Http.Get           # read the code
+sentinel block approve Http.Get        # you, at a terminal; pins the contents
+```
+
+An unapproved or modified block never loads, so a scheduled run cannot execute code nobody
+reviewed. Protocol, safety model and agent instructions: [docs/BLOCKS.md](docs/BLOCKS.md).
+Examples: `examples/blocks/`.
+
+**Compiled in** (Go): one `engine.Register(engine.Func(spec, fn))` call in `internal/blocks`.
 
 ### Guidelines
 
@@ -168,6 +183,8 @@ validator enforces its inputs.
 |---|---|
 | `SENTINEL_STATE_DIR` | where `sentinel.db` and task files live |
 | `SENTINEL_WEBHOOK_URL` | webhook for `Webhook.Post` (or file `~/.config/sentinel/webhook`) |
+| `SENTINEL_BLOCKS_DIR` | where plugin blocks live (default `<state dir>/blocks.d`) |
+| `SENTINEL_APPROVALS_FILE` | where block approvals are stored (default next to the blocks) |
 | `SENTINEL_AGENT_CMD` | program started by `Agent.Escalate` with `delivery: command`; it gets the task file path |
 
 ## Layout
@@ -177,7 +194,9 @@ validator enforces its inputs.
 | `cmd/sentinel` | CLI |
 | `internal/engine` | loader, validator, runner, expressions, graph rendering |
 | `internal/store` | SQLite state: runs, events, snapshots, flags, keys, escalations |
-| `internal/blocks` | block library |
+| `internal/blocks` | compiled-in block library |
+| `internal/plugin` | external blocks: manifest, process runner, approval gate, scaffold and check |
+| `examples/` | example plugin blocks and a workflow that uses them |
 | `internal/tui` | terminal UI |
 | `tools/demo` | scripts that record the demo video from the real TUI |
 | `workflows/` | your workflow files (`example.yaml` is a starter) |

@@ -36,6 +36,7 @@ type Spec struct {
 	Inputs  map[string]string `json:"inputs"`  // name → type (string|number|bool|list|map|any); "?" suffix = optional
 	Outputs map[string]string `json:"outputs"` // name → type
 	Doc     string            `json:"doc"`
+	Source  string            `json:"source,omitempty"` // "" for compiled-in blocks, "external" for loaded ones
 }
 
 // Env is what a block sees while it runs.
@@ -78,6 +79,29 @@ type Block interface {
 var registry = map[string]Block{}
 
 func Register(b Block) { registry[b.Spec().Name] = b }
+
+// IsRegistered reports whether a block of that name exists.
+func IsRegistered(name string) bool { _, ok := registry[name]; return ok }
+
+// ZeroOutputs returns a zero value for every declared output, for steps that did not run.
+func ZeroOutputs(outs map[string]string) map[string]any { return zeroOutputs(outs) }
+
+// Func turns a function into a Block, so a compiled-in block needs no type of its own:
+//
+//	engine.Register(engine.Func(engine.Spec{Name: "My.Block", ...}, func(env *engine.Env, in map[string]any) (map[string]any, error) {...}))
+func Func(spec Spec, run func(env *Env, in map[string]any) (map[string]any, error)) Block {
+	return funcBlock{spec, run}
+}
+
+type funcBlock struct {
+	spec Spec
+	run  func(env *Env, in map[string]any) (map[string]any, error)
+}
+
+func (f funcBlock) Spec() Spec { return f.spec }
+func (f funcBlock) Run(env *Env, in map[string]any) (map[string]any, error) {
+	return f.run(env, in)
+}
 
 func Blocks() []Spec {
 	var out []Spec

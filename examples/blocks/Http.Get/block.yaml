@@ -1,0 +1,17 @@
+name: Http.Get
+doc: >-
+  Fetches a URL with GET (http or https only) and returns the status code and the body as text.
+  Optional `headers` (a map) can carry an API token; name the secret in env so it is passed in.
+effect: read
+inputs:
+  url: string
+  headers: map?
+outputs:
+  status: number
+  body: string
+run: [python3, block.py]
+timeout: 30
+tests:
+  - name: refuses other schemes
+    in: { url: "file:///etc/passwd" }
+    error: only http
