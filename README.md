@@ -57,10 +57,12 @@ workflow. `↑↓` picks a run and the graph follows, `l` swaps the graph for th
 | `enter` | open workflow | |
 | `l` | | graph ⇄ run log |
 | `PgUp` `PgDn` | | scroll the graph or log |
+| `g` `G` | first / last workflow | newest / oldest run |
+| `←` `h` `backspace` | | back |
 | `d` / `r` | dry run / real run (asks first) | same |
 | `a` | mark escalation handled | same |
 | `p` | pause or resume | same |
-| `esc` | quit | back |
+| `esc` | (nothing) | back |
 | `?` / `q` | help / quit | help / quit |
 
 Colours: green border = ran, red = failed, yellow = would run (dry run), grey = skipped or not reached.
@@ -74,7 +76,7 @@ Requires Go 1.24+.
 git clone https://github.com/02david20/Sentinel.git
 cd Sentinel
 go build -o ~/.local/bin/sentinel ./cmd/sentinel
-sentinel doctor        # checks webhook, agent command, systemd, state folder
+sentinel doctor        # checks state, blocks, and the optional webhook / agent / systemd
 ```
 
 ## Quick start
@@ -85,7 +87,7 @@ sentinel validate workflows/example.yaml          # check a file
 sentinel run workflows/example.yaml --dry-run -v  # see what a run would do
 sentinel run workflows/example.yaml               # run once for real
 sentinel                                          # open the TUI
-sentinel install workflows/example.yaml           # schedule it (systemd user timer)
+sentinel install workflows/example.yaml           # schedule it (Linux: systemd user timer)
 ```
 
 After the first run, a workflow can be addressed by its name (`sentinel status example`).
@@ -96,18 +98,19 @@ After the first run, a workflow can be addressed by its name (`sentinel status e
 |---|---|
 | `run <name\|file> [--dry-run] [-v] [--json]` | run once, now |
 | `status [<name>]` | every workflow, or one in detail |
-| `logs <name> [id] [-n N]` | list runs, or show one run's log |
+| `logs <name> [id]` | the log of the latest run, or of run `id`; `logs <name> -n N` lists the last N runs |
 | `graph <name\|file> [--run [id]] [--mermaid] [--html file]` | draw the workflow; `--run` overlays a run |
 | `ack <name>` | mark an escalation as handled |
 | `pause` / `resume <name>` | stop or restart scheduled runs |
-| `install <file>` / `uninstall <name>` | create or remove the timer |
+| `install <file>` / `uninstall <name>` | create or remove the systemd timer (Linux) |
 | `validate <file>` | check a definition |
 | `blocks [--json]` | list blocks with inputs and outputs |
 | `block <list\|new\|add\|show\|check\|approve\|revoke\|remove>` | manage plugin blocks |
 | `tui` | the interactive view (same as bare `sentinel`) |
 | `doctor` | check settings |
 
-Exit codes: `0` ok, `1` failed, `2` wrong usage, `3` paused, `4` a connector login failed.
+Exit codes: `0` ok, `1` failed, `2` wrong usage, `3` paused, `4` a connector login failed,
+`5` a workflow uses a block that is not approved.
 
 ## Writing a workflow
 
@@ -157,14 +160,14 @@ a file, a database). Add one as a plugin block (`examples/blocks/Http.Get`, `Jso
 **Without recompiling** (any language, agent-friendly): scaffold, test, review, approve.
 
 ```bash
-sentinel block new Http.Get            # or: sentinel block add ./MyBlock
+sentinel block new Http.Get            # or: sentinel block add ./MyBlock  (names look like Group.Action)
 sentinel block check Http.Get          # manifest + tests
 sentinel block show Http.Get           # read the code
-sentinel block approve Http.Get        # you, at a terminal; pins the contents
+sentinel block approve Http.Get        # you, at a terminal: summary, diff, confirm, then pin
 ```
 
-An unapproved or modified block never loads, so a scheduled run cannot execute code nobody
-reviewed. Protocol, safety model and agent instructions: [docs/BLOCKS.md](docs/BLOCKS.md).
+An unapproved or modified block never loads, and an approved one is re-verified before every
+execution, so a scheduled run cannot execute code nobody reviewed. Protocol, safety model and agent instructions: [docs/BLOCKS.md](docs/BLOCKS.md).
 Examples: `examples/blocks/`.
 
 **Compiled in** (Go): one `engine.Register(engine.Func(spec, fn))` call in `internal/blocks`.

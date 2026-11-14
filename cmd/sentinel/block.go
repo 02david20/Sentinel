@@ -44,23 +44,54 @@ func loadPlugins() {
 	}
 }
 
-// hintBlocks explains "unknown block X" when X is a folder that is waiting for approval.
-func hintBlocks(errs []string) {
-	shown := map[string]bool{}
+// explain rewrites validation errors that are caused by a block waiting for approval: "unknown
+// block X" becomes a sentence that says what to do, and the errors that only follow from it
+// (references to that step) are dropped. needsApproval is true when every error was of that kind.
+func explain(errs []string) (out []string, needsApproval bool) {
+	hidden := map[string]bool{}
+	for _, in := range notLoaded {
+		hidden[in.Name] = true
+	}
+	approvalOnly := true
 	for _, e := range errs {
+		matched := false
 		for _, in := range notLoaded {
-			if strings.Contains(e, "unknown block "+in.Name) && !shown[in.Name] {
-				shown[in.Name] = true
-				fmt.Printf("  note: block %s exists but is %s. Review and approve it:  sentinel block check %s && sentinel block approve %s\n", in.Name, in.State, in.Name, in.Name)
+			if strings.HasSuffix(e, "unknown block "+in.Name) {
+				matched = true
+				why := map[string]string{
+					plugin.StatePending:    "was proposed but nobody approved it yet",
+					plugin.StateUnapproved: "is installed but was never approved",
+					plugin.StateModified:   "changed since you approved it",
+					plugin.StateInvalid:    "has a problem: " + in.Problem,
+					plugin.StateConflict:   "cannot be used: " + in.Problem,
+				}[in.State]
+				fix := fmt.Sprintf("review and approve it:  sentinel block show %s  then  sentinel block approve %s", in.Name, in.Name)
+				if in.State == plugin.StateInvalid || in.State == plugin.StateConflict {
+					fix = "fix it:  sentinel block check " + in.Name
+				}
+				out = append(out, fmt.Sprintf("%s: block %s %s. To fix, %s", strings.SplitN(e, ": unknown block", 2)[0], in.Name, why, fix))
+				if in.State == plugin.StateInvalid || in.State == plugin.StateConflict {
+					approvalOnly = false
+				}
 			}
 		}
+		if matched {
+			continue
+		}
+		if strings.Contains(e, "refers to a step that does not run before it") && len(notLoaded) > 0 {
+			continue // follows from the missing block above
+		}
+		approvalOnly = false
+		out = append(out, e)
 	}
+	return out, approvalOnly && len(out) > 0
 }
 
 const blockUsage = `usage: sentinel block <command>
 
   list                    every block folder and its state
-  new <Name> [--lang python|sh]   scaffold a working example into the pending folder
+  new <Group.Action> [--lang python|sh] [--effect read|write-internal|write-external]
+                          scaffold a working example (with tests) into the pending folder
   add <folder>            copy a block folder written elsewhere into the pending folder
   show <Name>             print the manifest and every file, to review before approving
   check <Name>            validate the manifest and run its tests
@@ -85,11 +116,17 @@ func cmdBlock(args []string) error {
 		fs := flag.NewFlagSet("block new", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
 		lang := fs.String("lang", "python", "python or sh")
-		name, frest := splitFirst(rest)
-		if err := fs.Parse(frest); err != nil || name == "" {
-			return usageErr("sentinel block new <Name> [--lang python|sh]")
+		effect := fs.String("effect", "read", "read, write-internal or write-external")
+		newUsage := usageErr("sentinel block new <Group.Action> [--lang python|sh] [--effect read|write-internal|write-external]")
+		// flags may come before or after the name
+		if err := fs.Parse(rest); err != nil || fs.NArg() == 0 {
+			return newUsage
 		}
-		dir, err := st.Scaffold(name, *lang)
+		name := fs.Arg(0)
+		if err := fs.Parse(fs.Args()[1:]); err != nil || fs.NArg() != 0 {
+			return newUsage
+		}
+		dir, err := st.Scaffold(name, *lang, *effect)
 		if err != nil {
 			return err
 		}
@@ -192,6 +229,7 @@ func checkBlock(in *plugin.Info) error {
 	}
 	m := in.Manifest
 	fmt.Printf("Checking %s (%s)\n", in.Name, effectWords(m.Effect))
+	fmt.Println("  note: this runs the block's own code on this machine (without its env secrets). Read it first if you did not write it:  sentinel block show " + in.Name)
 	bad := 0
 	for _, r := range plugin.Check(context.Background(), in) {
 		switch {
@@ -213,29 +251,76 @@ func checkBlock(in *plugin.Info) error {
 
 func approveBlock(st *plugin.Store, in *plugin.Info) error {
 	if !isTerminal() {
-		return exitErr{1, "approval needs a person at a terminal: run `sentinel block approve " + in.Name + "` yourself (an agent or script cannot approve its own block)"}
+		return exitErr{1, "approval needs a person at a terminal: run `sentinel block approve " + in.Name + "` yourself. (This stops a script from approving by accident; it is not a security boundary, so keep agents away from the approvals file.)"}
 	}
 	if in.Manifest == nil {
 		return exitErr{1, fmt.Sprintf("%s: %s", in.Name, in.Problem)}
 	}
-	for _, r := range plugin.Check(context.Background(), in) {
-		if !r.OK {
-			return exitErr{1, fmt.Sprintf("%s does not pass its checks (%s: %s). Run `sentinel block check %s`.", in.Name, r.Name, r.Why, in.Name)}
+	m := in.Manifest
+	rv, err := st.Review(in)
+	if err != nil {
+		return exitErr{1, fmt.Sprintf("%s cannot be reviewed: %v", in.Name, err)}
+	}
+	// Show everything first. Nothing of the block has been run at this point.
+	fmt.Printf("Review %s  (%s)\n", in.Name, effectWords(m.Effect))
+	fmt.Printf("  runs:      %s\n", strings.Join(m.Run, " "))
+	fmt.Printf("  files:     ")
+	total := 0
+	var parts []string
+	for _, f := range rv.Files {
+		total += f.Lines
+		parts = append(parts, fmt.Sprintf("%s (%d lines)", f.Name, f.Lines))
+	}
+	fmt.Printf("%s\n  sha256:    %s\n", strings.Join(parts, ", "), rv.Hash[:16])
+	if len(m.Env) > 0 {
+		fmt.Printf("  can read:  %s   <- environment variables, including secrets, in real runs\n", strings.Join(m.Env, ", "))
+	} else {
+		fmt.Println("  can read:  no environment variables beyond PATH, HOME and LANG")
+	}
+	if m.SupportsDry {
+		fmt.Println("  dry runs:  the block is started in dry runs and must only plan (its own promise)")
+	}
+	if len(rv.Hints) > 0 {
+		fmt.Printf("  code seems to: %s   (text search only, not an analysis)\n", strings.Join(rv.Hints, "; "))
+	}
+	fmt.Println("  The effect above is the author's own claim. The block is an ordinary process: it can read files")
+	fmt.Println("  and use the network as you. Read the code:  sentinel block show " + in.Name)
+	switch {
+	case rv.Previous && rv.HaveCopy && strings.TrimSpace(rv.Diff) != "":
+		fmt.Printf("\nChanged since you last approved it:\n%s\n", rv.Diff)
+	case rv.Previous && rv.HaveCopy:
+		fmt.Println("\nIdentical to the version you approved before.")
+	case rv.Previous:
+		fmt.Println("\nYou approved an earlier version, but no copy of it was kept, so no diff is available. Review all of it.")
+	default:
+		fmt.Println("\nFirst approval of this block.")
+	}
+	strict := m.Effect == engine.WriteExternal || len(m.Env) > 0
+	reader := bufio.NewReader(os.Stdin)
+	if strict {
+		fmt.Printf("\nThis block changes things outside or reads secrets. Type its name (%s) to approve: ", in.Name)
+		line, _ := reader.ReadString('\n')
+		if strings.TrimSpace(line) != in.Name {
+			fmt.Println("Not approved.")
+			return exitErr{1, ""}
+		}
+	} else {
+		fmt.Print("\nApprove? [y/N] ")
+		line, _ := reader.ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			fmt.Println("Not approved.")
+			return exitErr{1, ""}
 		}
 	}
-	m := in.Manifest
-	fmt.Printf("Approve %s?\n  effect:  %s\n  runs:    %s\n  folder:  %s\n", in.Name, effectWords(m.Effect), strings.Join(m.Run, " "), in.Dir)
-	if len(m.Env) > 0 {
-		fmt.Printf("  can read environment: %s\n", strings.Join(m.Env, ", "))
+	// Only now is the block's code run, for its tests. The hash shown above must still match.
+	fmt.Println("Running its tests ...")
+	for _, r := range plugin.Check(context.Background(), in) {
+		if !r.OK {
+			return exitErr{1, fmt.Sprintf("%s does not pass its tests (%s: %s), so it was not approved. Fix it and run `sentinel block check %s`.", in.Name, r.Name, r.Why, in.Name)}
+		}
 	}
-	fmt.Printf("  (review the code first:  sentinel block show %s)\nApprove? [y/N] ", in.Name)
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
-		fmt.Println("Not approved.")
-		return exitErr{1, ""}
-	}
-	if err := st.Approve(in.Name); err != nil {
-		return err
+	if err := st.Approve(in.Name, rv.Hash); err != nil {
+		return exitErr{1, err.Error()}
 	}
 	fmt.Printf("Approved %s. Workflows can use it now. If its files change it must be approved again.\n", in.Name)
 	return nil

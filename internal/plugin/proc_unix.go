@@ -7,8 +7,9 @@ import (
 	"syscall"
 )
 
-// newGroup runs the block in its own process group so a timeout can stop its children too.
-func newGroup() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setpgid: true} }
+// newGroup starts the block in its own session: it has no controlling terminal (it cannot read
+// the keyboard or answer a prompt) and its whole process group can be killed together.
+func newGroup() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setsid: true} }
 
 func killGroup(cmd *exec.Cmd) error {
 	if cmd.Process == nil {

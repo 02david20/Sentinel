@@ -64,6 +64,9 @@ func (m Model) View() string {
 		return m.helpView(w, h)
 	}
 	head := m.header(w)
+	if h < 16 { // a short terminal has no room for the full header
+		head = " " + label.Render("Workflows: ") + bold.Render(fmt.Sprint(len(m.snap.Rows))) + dim.Render("   ? help · q quit")
+	}
 	avail := h - len(strings.Split(head, "\n")) - 2 // crumb bar + message line
 	var body string
 	if m.screen == screenWorkflow {
@@ -87,7 +90,10 @@ func (m Model) workflowView(w, avail int) string {
 	d := m.detail
 	runsH := min(len(d.Runs)+3, 9)
 	runsH = max(runsH, 4)
-	topH := max(avail-runsH, 5)
+	if avail-runsH < 5 { // keep the runs list visible when the terminal is short
+		runsH = max(4, min(runsH, avail-3))
+	}
+	topH := max(avail-runsH, 3)
 	var lines []string
 	title := "graph(" + m.sel + ")"
 	switch {
@@ -315,12 +321,12 @@ func (m Model) helpView(w, h int) string {
 		k("enter", "open a workflow: its graph and every run"),
 		k("  (in one)  ↑ ↓", "pick a run: the graph shows what that run did"),
 		k("  (in one)  l", "show the run's log instead of the graph"),
-		k("  (in one)  PgUp", "scroll the graph or log (PgDn goes down)"),
+		k("  (in one)  PgUp", "scroll the graph or log (PgDn goes down); esc goes back"),
 		k("d", "dry run: reads, sends and saves nothing"),
 		k("r", "run for real (asks first; may post to the webhook and start an escalation)"),
 		k("a", "mark the waiting escalation as handled (asks first)"),
 		k("p", "pause or resume scheduled runs"),
-		k("q", "quit (esc goes back, or quits from the list)"),
+		k("q", "quit (esc goes back from a workflow)"),
 		"",
 		"  The screen refreshes every 3 seconds. It shows the same state as `sentinel status`.",
 		"  Closing it never changes how scheduled runs behave.",

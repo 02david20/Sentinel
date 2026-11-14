@@ -28,27 +28,31 @@ const usage = `sentinel: run recurring checks on a timer. It starts an agent onl
 
 Get started:
   sentinel                                   with no arguments in a terminal: the interactive view
-  sentinel doctor                            check your logins and settings
+  sentinel doctor                            check your settings
   sentinel run <name|file> --dry-run         see what a run would do; nothing is sent or saved
   sentinel install <file>                    schedule it
   sentinel status                            is it working? what did it do? what is next?
 
 All commands:
   sentinel run <name|file> [--dry-run] [-v]  run once, right now
-  sentinel graph <name|file> [--run [id]] [--mermaid] draw the workflow; --run shows what a run did
-  sentinel logs <name> [id] [-n 10]          the log of a run (the latest by default), or the list of runs
+  sentinel graph <name|file> [--run [id]]    draw the workflow; --run shows what a run did
+                  [--mermaid | --html file]
+  sentinel logs <name> [id]                  the log of the latest run, or of run <id>
+  sentinel logs <name> -n 10                 list the last runs
   sentinel status [<name>]                   every workflow, or the details of one
   sentinel ack <name> [--token <t>]          mark an escalation as handled
   sentinel pause|resume <name>               stop or restart scheduled runs
-  sentinel install <file> [--no-enable]      write and enable the timer
+  sentinel install <file> [--no-enable]      write and enable the timer (Linux, systemd)
   sentinel uninstall <name>                  stop and remove the timer
   sentinel tui                               interactive view (the same as plain sentinel in a terminal)
   sentinel validate <file>                   check a workflow definition
   sentinel blocks [--json]                   list the steps a workflow can use
-  sentinel block <list|new|add|show|check|approve|revoke|remove>   add your own steps (see docs/BLOCKS.md)
+  sentinel block <command>                   add your own steps: list new add show check approve
+                                             revoke remove (see docs/BLOCKS.md)
+  sentinel doctor                            check your settings
   sentinel version
 
-Exit codes: 0 ok | 1 failed | 2 wrong usage | 3 paused | 4 a connector login failed
+Exit codes: 0 ok | 1 failed | 2 wrong usage | 3 paused | 4 a connector login failed | 5 a block needs approval
 Settings (optional): SENTINEL_STATE_DIR, SENTINEL_WEBHOOK_URL (or ~/.config/sentinel/webhook), SENTINEL_AGENT_CMD, SENTINEL_BLOCKS_DIR, SENTINEL_APPROVALS_FILE
 `
 
@@ -282,10 +286,13 @@ func cmdValidate(args []string) error {
 	}
 	if errs := engine.Validate(p.Workflow); len(errs) > 0 {
 		fmt.Printf("%s has %d problem(s):\n", args[0], len(errs))
-		for _, e := range errs {
+		shown, approvalOnly := explain(errs)
+		for _, e := range shown {
 			fmt.Println("  -", e)
 		}
-		hintBlocks(errs)
+		if approvalOnly {
+			return exitErr{5, ""}
+		}
 		return exitErr{1, ""}
 	}
 	fmt.Printf("ok: %s (%d steps)\n", p.Workflow.Name, len(p.Workflow.Steps))
@@ -333,10 +340,13 @@ func runOne(ctx context.Context, st *store.Store, path string, dry, verbose, asJ
 	}
 	if errs := engine.Validate(p.Workflow); len(errs) > 0 {
 		fmt.Printf("%s has %d problem(s):\n", path, len(errs))
-		for _, e := range errs {
+		shown, approvalOnly := explain(errs)
+		for _, e := range shown {
 			fmt.Println("  -", e)
 		}
-		hintBlocks(errs)
+		if approvalOnly {
+			return exitErr{5, ""}
+		}
 		return exitErr{1, ""}
 	}
 	_ = st.RegisterWorkflow(p.Workflow.Name, path)
@@ -385,7 +395,11 @@ func printRun(name string, res *engine.Result, dry, verbose bool) {
 	case "failed":
 		fmt.Printf("%s: failed. %s\n", name, humanError(res.Summary))
 		if !dry {
-			fmt.Println("It will try again at the next scheduled run. Details: sentinel status", name)
+			if strings.HasPrefix(timerState(name), "(no timer") {
+				fmt.Println("Details: sentinel logs", name)
+			} else {
+				fmt.Println("It will try again at the next scheduled run. Details: sentinel logs", name)
+			}
 		}
 		return
 	}
@@ -639,44 +653,52 @@ func cmdPause(verb string, args []string) error {
 
 func cmdDoctor() error {
 	bad := 0
-	row := func(ok bool, what, detail, fix string) {
-		mark := "ok     "
-		if !ok {
-			mark = "MISSING"
+	// required items fail the command; optional ones only say what you would be missing.
+	row := func(ok, required bool, what, detail, fix string) {
+		mark := "ok      "
+		if !ok && required {
+			mark = "MISSING "
 			bad++
+		} else if !ok {
+			mark = "optional"
 		}
-		fmt.Printf("%-8s %-14s %s\n", mark, what, detail)
+		fmt.Printf("%-9s %-14s %s\n", mark, what, detail)
 		if !ok && fix != "" {
-			fmt.Printf("                        -> %s\n", fix)
+			fmt.Printf("                       -> %s\n", fix)
 		}
-	}
-	if _, err := blocks.LoadWebhook(); err == nil {
-		row(true, "Webhook", "found", "")
-	} else {
-		row(false, "Webhook", "not set (alerts cannot be delivered)", "put the webhook URL in ~/.config/sentinel/webhook, or set SENTINEL_WEBHOOK_URL")
-	}
-	if agent := os.Getenv("SENTINEL_AGENT_CMD"); agent == "" {
-		row(true, "Agent command", "not set (only needed for delivery: command)", "")
-	} else if p, err := exec.LookPath(agent); err == nil {
-		row(true, "Agent command", p, "")
-	} else {
-		row(false, "Agent command", "not found: "+agent, "set SENTINEL_AGENT_CMD to the executable's full path")
-	}
-	if err := exec.Command("systemctl", "--user", "show-environment").Run(); err == nil {
-		row(true, "systemd (user)", "available", "")
-	} else {
-		row(false, "systemd (user)", "not available (needed for the timer)", "systemd user services are required (Linux)")
 	}
 	if st, err := openStore(); err == nil {
 		st.Close()
-		row(true, "State folder", stateDir(), "")
+		row(true, true, "State folder", stateDir(), "")
 	} else {
-		row(false, "State folder", err.Error(), "check that "+stateDir()+" is writable")
+		row(false, true, "State folder", err.Error(), "check that "+stateDir()+" is writable")
+	}
+	if infos, err := pluginStore().List(); err != nil {
+		row(false, true, "Blocks folder", err.Error(), "check "+blocksDir())
+	} else {
+		row(true, true, "Blocks folder", fmt.Sprintf("%s (%d external block(s))", blocksDir(), len(infos)), "")
+	}
+	if _, err := blocks.LoadWebhook(); err == nil {
+		row(true, false, "Webhook", "found", "")
+	} else {
+		row(false, false, "Webhook", "not set; needed only for the Webhook.Post block", "put the webhook URL in ~/.config/sentinel/webhook, or set SENTINEL_WEBHOOK_URL")
+	}
+	if agent := os.Getenv("SENTINEL_AGENT_CMD"); agent == "" {
+		row(true, false, "Agent command", "not set; needed only for Agent.Escalate with delivery: command", "")
+	} else if p, err := exec.LookPath(agent); err == nil {
+		row(true, false, "Agent command", p, "")
+	} else {
+		row(false, true, "Agent command", "not found: "+agent, "set SENTINEL_AGENT_CMD to the executable's full path")
+	}
+	if err := exec.Command("systemctl", "--user", "show-environment").Run(); err == nil {
+		row(true, false, "systemd (user)", "available", "")
+	} else {
+		row(false, false, "systemd (user)", "not available; needed only for `sentinel install` (Linux)", "")
 	}
 	if bad > 0 {
 		return exitErr{1, fmt.Sprintf("\n%d thing(s) to fix.", bad)}
 	}
-	fmt.Println("\nAll good.")
+	fmt.Println("\nReady. Optional items only matter for the features named above.")
 	return nil
 }
 

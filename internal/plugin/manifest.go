@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	nameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*$`)
+	nameRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)+$`)
 	typeRe = regexp.MustCompile(`^(string|number|bool|list|map|any)\??$`)
 	envRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
@@ -56,6 +56,9 @@ type Test struct {
 
 // ParseManifest reads and validates dir/block.yaml.
 func ParseManifest(dir string) (*Manifest, error) {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
 	b, err := os.ReadFile(filepath.Join(dir, ManifestFile))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read %s: %w", ManifestFile, err)
@@ -79,7 +82,7 @@ func ParseManifest(dir string) (*Manifest, error) {
 func (m *Manifest) Validate() []string {
 	var errs []string
 	if !nameRe.MatchString(m.Name) {
-		errs = append(errs, "name must look like Http.Get (letters, digits, _ and dots)")
+		errs = append(errs, "name must look like Http.Get: capitalised words joined by dots (Group.Action)")
 	}
 	switch m.Effect {
 	case engine.Read, engine.WriteInternal, engine.WriteExternal:
@@ -91,23 +94,31 @@ func (m *Manifest) Validate() []string {
 	}
 	if len(m.Run) == 0 || m.Run[0] == "" {
 		errs = append(errs, "run is required, for example [python3, block.py]")
+	} else {
+		errs = append(errs, checkRun(m.Run)...)
 	}
 	if m.Timeout < 0 || m.Timeout > maxTimeout {
-		errs = append(errs, fmt.Sprintf("timeout must be between 1 and %d seconds", maxTimeout))
+		errs = append(errs, fmt.Sprintf("timeout must be between 1 and %d seconds (omit it for %d)", maxTimeout, defaultTimeout))
 	}
 	for k, t := range m.Inputs {
-		if !typeRe.MatchString(t) || k == "" || strings.HasPrefix(k, "_") {
-			errs = append(errs, fmt.Sprintf("input %q: type %q is not string, number, bool, list, map or any (add ? if optional); names cannot start with _", k, t))
+		if k == "" || strings.HasPrefix(k, "_") {
+			errs = append(errs, fmt.Sprintf("input %q: names cannot be empty or start with _", k))
+		} else if !typeRe.MatchString(t) {
+			errs = append(errs, fmt.Sprintf("input %q: type %q is not string, number, bool, list, map or any (add ? if optional)", k, t))
 		}
 	}
 	for k, t := range m.Outputs {
-		if !typeRe.MatchString(t) || strings.HasSuffix(t, "?") || k == "" || strings.HasPrefix(k, "_") {
-			errs = append(errs, fmt.Sprintf("output %q: type %q is not string, number, bool, list, map or any; names cannot start with _", k, t))
+		if k == "" || strings.HasPrefix(k, "_") {
+			errs = append(errs, fmt.Sprintf("output %q: names cannot be empty or start with _", k))
+		} else if !typeRe.MatchString(t) || strings.HasSuffix(t, "?") {
+			errs = append(errs, fmt.Sprintf("output %q: type %q is not string, number, bool, list or map (or any)", k, t))
 		}
 	}
 	for _, e := range m.Env {
 		if !envRe.MatchString(e) {
 			errs = append(errs, fmt.Sprintf("env %q is not a variable name", e))
+		} else if strings.HasPrefix(e, "SENTINEL_") {
+			errs = append(errs, fmt.Sprintf("env %q: a block cannot read Sentinel's own settings", e))
 		}
 	}
 	for i, t := range m.Tests {
@@ -116,6 +127,34 @@ func (m *Manifest) Validate() []string {
 		}
 		if m.Effect != engine.Read && !t.Dry {
 			errs = append(errs, fmt.Sprintf("test %d: a block that changes things may only be tested with dry: true", i+1))
+		}
+	}
+	return errs
+}
+
+// checkRun keeps the command inside the reviewed folder: the program is either a bare command
+// found on PATH (an interpreter such as python3 or sh) or a relative path inside the folder, and
+// no argument may point outside it. Anything the command runs from the folder is covered by the
+// approval hash; anything outside would not be.
+func checkRun(run []string) []string {
+	var errs []string
+	for i, a := range run {
+		if a == "" {
+			errs = append(errs, "run contains an empty argument")
+			continue
+		}
+		if filepath.IsAbs(a) {
+			errs = append(errs, fmt.Sprintf("run argument %q is an absolute path; keep everything the block runs inside its own folder", a))
+			continue
+		}
+		if i == 0 && strings.HasPrefix(a, "-") {
+			errs = append(errs, "run must start with a program")
+		}
+		for _, seg := range strings.Split(filepath.ToSlash(a), "/") {
+			if seg == ".." {
+				errs = append(errs, fmt.Sprintf("run argument %q escapes the block folder (..)", a))
+				break
+			}
 		}
 	}
 	return errs

@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"sentinel/internal/engine"
+	"sentinel/internal/plugin"
 )
 
 // The service exits 3 (paused) and 4 (needs login) on purpose; neither is a unit failure, so the
@@ -22,10 +25,7 @@ ExecStart={{.Exec}}
 SuccessExitStatus=3 4
 TimeoutStartSec=30min
 Environment=PATH={{.Path}}
-{{- if .Agent}}
-Environment=SENTINEL_AGENT_CMD={{.Agent}}
-{{- end}}
-`))
+{{.Env}}`))
 
 var timerTmpl = template.Must(template.New("t").Parse(`[Unit]
 Description=Schedule for sentinel workflow {{.Name}}
@@ -71,9 +71,13 @@ func cmdInstall(args []string) error {
 		return err
 	}
 	if errs := validateWorkflow(p); len(errs) > 0 {
-		fmt.Printf("%s has %d problem(s):\n", path, len(errs))
-		for _, e := range errs {
+		shown, approvalOnly := explain(errs)
+		fmt.Printf("%s has %d problem(s):\n", path, len(shown))
+		for _, e := range shown {
 			fmt.Println("  -", e)
+		}
+		if approvalOnly {
+			return exitErr{5, ""}
 		}
 		return exitErr{1, ""}
 	}
@@ -91,9 +95,18 @@ func cmdInstall(args []string) error {
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
 		return err
 	}
-	agent := os.Getenv("SENTINEL_AGENT_CMD")
+	// A timer does not inherit your shell: carry the settings that decide which state, blocks and
+	// approvals a scheduled run uses, so it behaves like the runs you see from the terminal.
+	abs := func(p string) string { a, _ := filepath.Abs(p); return a }
+	envLines := envLine("SENTINEL_STATE_DIR", abs(stateDir())) + envLine("SENTINEL_BLOCKS_DIR", abs(blocksDir()))
+	if v := os.Getenv("SENTINEL_APPROVALS_FILE"); v != "" {
+		envLines += envLine("SENTINEL_APPROVALS_FILE", abs(v))
+	}
+	if v := os.Getenv("SENTINEL_AGENT_CMD"); v != "" {
+		envLines += envLine("SENTINEL_AGENT_CMD", v)
+	}
 	data := map[string]string{
-		"Name": p.Workflow.Name, "Dir": filepath.Dir(path), "Calendar": calendar, "Agent": agent,
+		"Name": p.Workflow.Name, "Dir": filepath.Dir(path), "Calendar": calendar, "Env": envLines,
 		"Exec": unitQuote(b) + " run " + unitQuote(path),
 		"Path": strings.ReplaceAll(os.Getenv("PATH"), "%", "%%"),
 	}
@@ -110,6 +123,9 @@ func cmdInstall(args []string) error {
 		}
 	}
 	_ = st.RegisterWorkflow(p.Workflow.Name, path)
+	if vars := blockEnvVars(p); len(vars) > 0 {
+		fmt.Printf("Note: these blocks read environment variables, which a timer does not inherit from your shell:\n  %s\nSet them for the timer (systemctl --user edit sentinel-%s.service) or the blocks will run without them.\n", strings.Join(vars, "\n  "), p.Workflow.Name)
+	}
 	if *noEnable {
 		fmt.Printf("Wrote the timer for %s (%s) but did not start it.\n", p.Workflow.Name, phrase)
 		return nil
@@ -149,4 +165,29 @@ func cmdUninstall(args []string) error {
 	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 	fmt.Printf("Removed the timer for %s. Its history stays; the workflow file is untouched.\n", args[0])
 	return nil
+}
+
+// envLine renders one quoted Environment= line for a systemd unit.
+func envLine(k, v string) string {
+	v = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "\n", " ").Replace(v)
+	return "Environment=\"" + k + "=" + v + "\"\n"
+}
+
+// blockEnvVars lists "Block: VAR, VAR" for the plugin blocks a workflow uses that declare env.
+func blockEnvVars(p *engine.Package) []string {
+	infos, err := pluginStore().List()
+	if err != nil {
+		return nil
+	}
+	used := map[string]bool{}
+	for _, st := range p.Workflow.Steps {
+		used[st.Block] = true
+	}
+	var out []string
+	for _, in := range infos {
+		if in.State == plugin.StateApproved && used[in.Name] && in.Manifest != nil && len(in.Manifest.Env) > 0 {
+			out = append(out, in.Name+": "+strings.Join(in.Manifest.Env, ", "))
+		}
+	}
+	return out
 }

@@ -41,6 +41,7 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db, path: path}
 	if err := s.migrate(); err != nil {
+		db.Close()
 		return nil, err
 	}
 	for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -62,6 +63,42 @@ CREATE TABLE IF NOT EXISTS flag (workflow TEXT PRIMARY KEY, paused INTEGER, reas
 CREATE TABLE IF NOT EXISTS run_event (run_id INTEGER, seq INTEGER, at TEXT, step TEXT, kind TEXT, msg TEXT, PRIMARY KEY (run_id, seq));
 CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY AUTOINCREMENT, workflow TEXT, pkg_hash TEXT, started TEXT, ended TEXT,
   dry INTEGER, status TEXT, summary TEXT, steps TEXT, tokens INTEGER DEFAULT 0);`)
+	if err != nil {
+		return err
+	}
+	// Databases made by an older version lack later columns: CREATE TABLE IF NOT EXISTS leaves
+	// them alone, so add what is missing.
+	for _, c := range []struct{ table, col, def string }{
+		{"run", "pkg_hash", "TEXT"}, {"run", "ended", "TEXT"}, {"run", "dry", "INTEGER DEFAULT 0"}, {"run", "summary", "TEXT"},
+		{"run", "steps", "TEXT"}, {"run", "tokens", "INTEGER DEFAULT 0"},
+		{"idem", "run_id", "INTEGER DEFAULT 0"}, {"idem", "done", "INTEGER DEFAULT 0"},
+	} {
+		if err := s.addColumn(c.table, c.col, c.def); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) addColumn(table, col, def string) error {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	has := false
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		has = has || n == col
+	}
+	rows.Close()
+	if has {
+		return nil
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + col + ` ` + def)
 	return err
 }
 
@@ -304,10 +341,10 @@ func (s *Store) ReapCrashed(workflow string) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM idem WHERE workflow=? AND done=0 AND run_id IN (SELECT id FROM run WHERE workflow=? AND status='running')`, workflow, workflow); err != nil {
+	if _, err := tx.Exec(`DELETE FROM idem WHERE workflow=? AND done=0 AND run_id IN (SELECT id FROM run WHERE workflow=? AND status='running' AND dry=0)`, workflow, workflow); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE run SET status='crashed', ended=?, summary='the run never finished (process killed or crashed)' WHERE workflow=? AND status='running'`,
+	res, err := tx.Exec(`UPDATE run SET status='crashed', ended=?, summary='the run never finished (process killed or crashed)' WHERE workflow=? AND status='running' AND dry=0`,
 		time.Now().UTC().Format(time.RFC3339), workflow)
 	if err != nil {
 		return 0, err

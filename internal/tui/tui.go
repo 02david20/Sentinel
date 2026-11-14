@@ -57,6 +57,7 @@ type loadedMsg struct {
 }
 type detailMsg struct {
 	d   Detail
+	req int64 // the run id that was asked for (0 = latest)
 	err error
 }
 type tickMsg time.Time
@@ -130,8 +131,19 @@ func (m Model) loadDetail() tea.Cmd {
 	be, name, id := m.be, m.sel, m.runID
 	return func() tea.Msg {
 		d, err := be.Detail(name, id)
-		return detailMsg{d: d, err: err}
+		return detailMsg{d: d, req: id, err: err}
 	}
+}
+
+// topLines is what the top pane of the workflow screen shows: the graph or the run's log.
+func (m Model) topLines() []string {
+	if m.showLog {
+		return logLines(m.detail, max(m.width, 40)-4)
+	}
+	if m.detail.GraphErr != "" {
+		return []string{"", "  Cannot draw the graph: " + m.detail.GraphErr}
+	}
+	return graphLines(m.detail, max(m.width, 40)-2)
 }
 
 // refresh reloads the list and, on the workflow screen, the open workflow too.
@@ -172,7 +184,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.note = "Could not load " + m.sel + ": " + msg.err.Error()
 			return m, nil
 		}
-		if msg.d.Name == m.sel && m.screen == screenWorkflow {
+		// a reply for a run that is no longer the selected one (a slow refresh) is dropped
+		if msg.d.Name == m.sel && m.screen == screenWorkflow && msg.req == m.runID {
 			m.detail = msg.d
 		}
 		return m, nil
@@ -251,10 +264,6 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen, m.detail, m.runID, m.showLog, m.scroll = screenList, Detail{}, 0, false, 0
 			return m, nil
 		}
-		if s == "esc" {
-			m.quitting = true
-			return m, tea.Quit
-		}
 	case "enter", "right":
 		if m.screen == screenList && cur != nil {
 			m.screen, m.runID, m.showLog, m.scroll = screenWorkflow, 0, false, 0
@@ -268,7 +277,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "pgdown", "ctrl+d":
 		if m.screen == screenWorkflow {
-			m.scroll += 5
+			m.scroll = min(m.scroll+5, max(0, len(m.topLines())-1))
 		}
 	case "pgup", "ctrl+u":
 		if m.screen == screenWorkflow {

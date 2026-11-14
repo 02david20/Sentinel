@@ -83,6 +83,12 @@ func Register(b Block) { registry[b.Spec().Name] = b }
 // IsRegistered reports whether a block of that name exists.
 func IsRegistered(name string) bool { _, ok := registry[name]; return ok }
 
+// IsBuiltin reports whether a compiled-in block (not a loaded plugin) has that name.
+func IsBuiltin(name string) bool {
+	b, ok := registry[name]
+	return ok && b.Spec().Source != "external"
+}
+
 // ZeroOutputs returns a zero value for every declared output, for steps that did not run.
 func ZeroOutputs(outs map[string]string) map[string]any { return zeroOutputs(outs) }
 
@@ -235,6 +241,7 @@ func Validate(w Workflow) []string {
 	}
 	outputs := map[string]map[string]string{}
 	seen := map[string]bool{}
+	unknown := map[string]bool{} // steps whose block does not exist: references to them are not reported again
 	for i, st := range w.Steps {
 		at := fmt.Sprintf("step %d (%s)", i+1, st.ID)
 		if st.ID == "" || !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(st.ID) {
@@ -248,6 +255,7 @@ func Validate(w Workflow) []string {
 		b, ok := registry[st.Block]
 		if !ok {
 			errs = append(errs, at+": unknown block "+st.Block)
+			unknown[st.ID] = true
 			continue
 		}
 		sp := b.Spec()
@@ -266,6 +274,9 @@ func Validate(w Workflow) []string {
 			if ref, isRef := v.(string); isRef && refRe.MatchString(ref) {
 				m := refRe.FindStringSubmatch(ref)
 				outs, prior := outputs[m[1]]
+				if unknown[m[1]] {
+					continue
+				}
 				if !prior || m[1] == st.ID {
 					errs = append(errs, fmt.Sprintf("%s: %q refers to a step that does not run before it", at, ref))
 					continue

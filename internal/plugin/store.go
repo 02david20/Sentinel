@@ -95,6 +95,9 @@ func (s *Store) List() ([]Info, error) {
 				info.State = StateApproved
 			}
 			if !area.pending {
+				if engine.IsBuiltin(m.Name) {
+					info.State, info.Problem = StateConflict, "a built-in block already has this name"
+				}
 				if seen[m.Name] {
 					info.State, info.Problem = StateConflict, "another installed block has this name"
 				}
@@ -144,23 +147,33 @@ func (s *Store) Register() ([]Info, error) {
 		if in.State != StateApproved {
 			continue
 		}
-		if engine.IsRegistered(in.Name) {
-			in.State, in.Problem = StateConflict, "a built-in block already has this name"
-			continue
-		}
-		engine.Register(extBlock{m: in.Manifest, dir: in.Dir})
+		engine.Register(extBlock{m: in.Manifest, dir: in.Dir, hash: in.Hash})
 	}
 	return all, nil
 }
 
-// Approve pins the current contents of an installed block. A pending block is moved in first.
-func (s *Store) Approve(name string) error {
+// SnapshotDir is where a copy of each approved block is kept, so a later change can be shown as
+// a diff against what was approved.
+func (s *Store) SnapshotDir(name string) string {
+	return filepath.Join(filepath.Dir(s.ApprovalsPath), "_snapshots", name)
+}
+
+// Approve pins the contents of a block, but only if they are exactly expectedHash: the hash the
+// person was shown. A pending block is moved into place first and re-checked there, so a folder
+// that changed between review and approval is never pinned.
+func (s *Store) Approve(name, expectedHash string) error {
 	in, err := s.Find(name)
 	if err != nil {
 		return err
 	}
 	if in.Manifest == nil {
 		return fmt.Errorf("%s: %s", name, in.Problem)
+	}
+	if engine.IsBuiltin(in.Name) {
+		return fmt.Errorf("%s clashes with a built-in block and cannot be approved; rename it", in.Name)
+	}
+	if h, err := HashDir(in.Dir); err != nil || h != expectedHash {
+		return fmt.Errorf("%s changed after you reviewed it (or could not be read); nothing was approved. Review it again", in.Name)
 	}
 	if in.State == StatePending {
 		dest := filepath.Join(s.Root, in.Name)
@@ -174,30 +187,30 @@ func (s *Store) Approve(name string) error {
 			return err
 		}
 		in.Dir = dest
+		if h, err := HashDir(dest); err != nil || h != expectedHash {
+			return fmt.Errorf("%s changed while it was being installed; it stays unapproved. Review it again", in.Name)
+		}
 	}
-	h, err := HashDir(in.Dir)
-	if err != nil {
-		return err
+	snap := s.SnapshotDir(in.Name)
+	_ = os.RemoveAll(snap)
+	if err := copyDir(in.Dir, snap); err != nil {
+		return fmt.Errorf("could not keep a copy of the approved block: %w", err)
 	}
-	appr, err := loadApprovals(s.ApprovalsPath)
-	if err != nil {
-		return err
-	}
-	appr[in.Name] = Approval{Hash: h, ApprovedAt: now()}
-	return saveApprovals(s.ApprovalsPath, appr)
+	return updateApprovals(s.ApprovalsPath, func(a Approvals) error {
+		a[in.Name] = Approval{Hash: expectedHash, ApprovedAt: now()}
+		return nil
+	})
 }
 
 // Revoke removes an approval; the folder stays but the block stops loading.
 func (s *Store) Revoke(name string) error {
-	appr, err := loadApprovals(s.ApprovalsPath)
-	if err != nil {
-		return err
-	}
-	if _, ok := appr[name]; !ok {
-		return fmt.Errorf("%s has no approval", name)
-	}
-	delete(appr, name)
-	return saveApprovals(s.ApprovalsPath, appr)
+	return updateApprovals(s.ApprovalsPath, func(a Approvals) error {
+		if _, ok := a[name]; !ok {
+			return fmt.Errorf("%s has no approval", name)
+		}
+		delete(a, name)
+		return nil
+	})
 }
 
 // Remove deletes a block folder (installed or pending) and its approval.
@@ -209,11 +222,12 @@ func (s *Store) Remove(name string) error {
 	if err := os.RemoveAll(in.Dir); err != nil {
 		return err
 	}
-	if appr, err := loadApprovals(s.ApprovalsPath); err == nil {
-		if _, ok := appr[in.Name]; ok && in.State != StatePending {
-			delete(appr, in.Name)
-			return saveApprovals(s.ApprovalsPath, appr)
-		}
+	if in.State == StatePending {
+		return nil
 	}
-	return nil
+	_ = os.RemoveAll(s.SnapshotDir(in.Name))
+	return updateApprovals(s.ApprovalsPath, func(a Approvals) error {
+		delete(a, in.Name)
+		return nil
+	})
 }
