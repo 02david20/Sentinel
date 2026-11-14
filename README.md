@@ -159,6 +159,12 @@ a file, a database). Add one as a plugin block (`examples/blocks/Http.Get`, `Jso
 
 **Without recompiling** (any language, agent-friendly): scaffold, test, review, approve.
 
+![Plugin block demo](docs/demo-plugins.gif)
+
+[Watch as video (mp4)](docs/demo-plugins.mp4): an agent scaffolds a block, a workflow refuses it
+until a person approves, the review shows what the code can do before anything runs, the block is
+edited after approval and stops loading, and re-approval shows the diff.
+
 ```bash
 sentinel block new Http.Get            # or: sentinel block add ./MyBlock  (names look like Group.Action)
 sentinel block check Http.Get          # manifest + tests

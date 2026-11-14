@@ -11,3 +11,6 @@ tools/demo/demo/
 tools/demo/frames/
 tools/demo/venv/
 tools/demo/srv.pid
+tools/demo/frames-plugin/
+tools/demo/plugin-demo/
+tools/demo/__pycache__/
